@@ -1,0 +1,21 @@
+{
+  "name": "shift-server",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "bcrypt": "^6.0.0",
+    "cors": "^2.8.6",
+    "date-fns": "^4.3.0",
+    "express": "^5.2.1",
+    "react-big-calendar": "^1.19.4",
+    "react-draggable": "^4.5.0",
+    "sqlite3": "^6.0.1"
+  }
+}
