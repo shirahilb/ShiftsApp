@@ -1,10 +1,12 @@
 // 1. ייבוא הספריות שהתקנו
+require('dotenv').config(); // השורה החדשה שאומרת לשרת לקרוא את קובץ ה-.env
 const express = require('express');
 const sqlite3 = require('sqlite3').verbose();
 const cors = require('cors');
 const bcrypt = require('bcrypt'); // תוודאי שזה כתוב בדיוק ככה
 const db = new sqlite3.Database('./shifts.db');
-  const saltRounds = 10;
+const { google } = require('googleapis');
+const saltRounds = 10;
 db.run('PRAGMA journal_mode = WAL;');
 
 // 2. יצירת האפליקציה של השרת
@@ -15,7 +17,54 @@ app.use(cors()); // מאפשר גישה מכתובות אחרות
 app.use(express.json()); // מאפשר לשרת לקרוא נתונים שנשלחים אליו בפורמט JSON
 // הוספת פונקציית העזר הגלובלית
 // ווידוא יצירת טבלת Periods מיד בתחילת השרת
+// הגדרת החיבור לגוגל בעזרת המפתחות מקובץ ה-.env
+const oauth2Client = new google.auth.OAuth2(
+  process.env.GOOGLE_CLIENT_ID,
+  process.env.GOOGLE_CLIENT_SECRET,
+  process.env.GOOGLE_REDIRECT_URI
+);
 
+// 1. נתיב שמייצר את קישור ההתחברות לגוגל עבור החייל
+app.get('/api/calendar/auth-url', (req, res) => {
+  const userId = req.query.userId;
+  
+  const url = oauth2Client.generateAuthUrl({
+    access_type: 'offline', // חובה כדי לקבל Refresh Token
+    prompt: 'consent',      // מכריח את גוגל להציג את מסך האישור
+    scope: ['https://www.googleapis.com/auth/calendar.events'],
+    state: userId           // אנחנו מעבירים את ה-ID של החייל כדי שנזכור מי התחבר
+  });
+  
+  res.json({ url });
+});
+
+// 2. נתיב הקולבק - לכאן גוגל מחזירה את החייל אחרי שהוא מאשר
+app.get('/api/calendar/auth/callback', async (req, res) => {
+  const { code, state: userId } = req.query; 
+  
+  try {
+    // ממירים את הקוד הזמני שגוגל שלחה למפתחות קבועים
+    const { tokens } = await oauth2Client.getToken(code);
+    
+    // אם גוגל החזירה מפתח קבוע (Refresh Token), נשמור אותו לחייל במסד הנתונים
+    if (tokens.refresh_token) {
+       db.run(`UPDATE Users SET google_refresh_token = ? WHERE id = ?`, [tokens.refresh_token, userId], (err) => {
+         if (err) console.error("שגיאה בשמירת הטוקן:", err);
+       });
+    }
+    
+    // הודעה שמוצגת לחייל בדפדפן רגע לפני שהוא חוזר לאפליקציה
+    res.send(`
+      <div style="text-align: center; margin-top: 50px; font-family: sans-serif; direction: rtl;">
+        <h1 style="color: #28593C;">היומן קושר בהצלחה! 🎉</h1>
+        <h3>אפשר לסגור את החלון הזה ולחזור למערכת.</h3>
+      </div>
+    `);
+  } catch (error) {
+    console.error("שגיאה בקבלת הטוקנים:", error);
+    res.status(500).send("שגיאה בחיבור ליומן. אנא נסה שוב.");
+  }
+});
 // 4. יצירת נתיב (Route) ראשון לדוגמה
 // כשהאתר שלנו יפנה לכתובת הזו, הוא יקבל חזרה את ההודעה
 app.get('/api/test', (req, res) => {
@@ -82,13 +131,13 @@ app.post('/api/users', (req, res) => {
 
     // 3. הוספנו את הערך של הdivision למערך הפרמטרים (אם ריק נשמר כ"לא מוגדר" או מה שתבחרי)
     const params = [
-      organization_id, 
-      full_name, 
-      password, 
-      role || 'soldier', 
-      does_shifts ?? 1, 
-      is_active ?? 1, 
-      release_date || null, 
+      organization_id,
+      full_name,
+      password,
+      role || 'soldier',
+      does_shifts ?? 1,
+      is_active ?? 1,
+      release_date || null,
       potential_reduction || 0,
       division || 'לא מוגדר'
     ];
@@ -443,7 +492,7 @@ app.get('/api/constraints', (req, res) => {
   const sql = `SELECT c.*, u.full_name 
                  FROM Constraints c 
                  LEFT JOIN Users u ON c.user_id = u.id`;
-                 
+
   db.all(sql, [], (err, rows) => {
     if (err) return res.status(500).json({ error: err.message });
     res.json(rows);
@@ -507,20 +556,20 @@ app.post('/api/constraints', (req, res) => {
   // בדיקה אוטומטית והוספת עמודת division לטבלה אם היא עוד לא קיימת
   db.run("ALTER TABLE Constraints ADD COLUMN division TEXT", (alterErr) => {
     // השגיאה מתעלמת במכוון אם העמודה כבר קיימת בטבלה
-    
+
     const sql = `INSERT INTO Constraints (organization_id, user_id, start_date, end_date, reason, division) 
                  VALUES (?, ?, ?, ?, ?, ?)`;
-                 
+
     const params = [
-      organization_id || 1, 
-      user_id || null, 
-      start_date, 
-      end_date, 
-      reason || '', 
+      organization_id || 1,
+      user_id || null,
+      start_date,
+      end_date,
+      reason || '',
       division || null
     ];
 
-    db.run(sql, params, function(err) {
+    db.run(sql, params, function (err) {
       if (err) {
         console.error("שגיאה בהוספת אילוץ:", err.message);
         return res.status(500).json({ error: err.message });
@@ -622,7 +671,7 @@ app.post('/api/periods', (req, res) => {
   if (!organization_id) {
     return res.status(400).json({ error: "Missing organization_id" });
   }
-  
+
   db.serialize(() => {
     db.run("BEGIN TRANSACTION");
     db.run("DELETE FROM Periods WHERE organization_id = ?", [organization_id], (err) => {
@@ -682,118 +731,118 @@ function hasExemption(user, shift) {
 }
 
 function calculateFairnessScore(user, allShifts) {
-    const userShifts = allShifts.filter(s => s.user_id === user.id);
-    
-    return userShifts.reduce((totalScore, s) => {
-        let shiftScore = 0;
-        
-        // נניח ש-shift_type_id הוא המפתח לזיהוי הסוג
-        // את צריכה להתאים את ה-ID לפי מה שיש לך בטבלת ShiftTypes
-        if (s.type === 'מטבח_חול') {
-            // כל יום = 1 נקודה, חוץ מחמישי = 0.5
-            // כאן צריך לוגיקה שמזהה אם יום חמישי כלול בתאריכים
-            shiftScore = calculateKitchenScore(s, 'Thursday', 0.5);
-        } 
-        else if (s.type === 'מטבח_סופש') {
-            // יום שני = 0.5
-            shiftScore = calculateKitchenScore(s, 'Monday', 0.5);
-        }
-        else if (s.type === 'שמירה') {
-            // ימי שני = 0.5
-            shiftScore = calculateKitchenScore(s, 'Monday', 0.5);
-        }
-        else {
-            // ברירת מחדל
-            shiftScore = 1; 
-        }
-        
-        return totalScore + shiftScore;
-    }, 0);
+  const userShifts = allShifts.filter(s => s.user_id === user.id);
+
+  return userShifts.reduce((totalScore, s) => {
+    let shiftScore = 0;
+
+    // נניח ש-shift_type_id הוא המפתח לזיהוי הסוג
+    // את צריכה להתאים את ה-ID לפי מה שיש לך בטבלת ShiftTypes
+    if (s.type === 'מטבח_חול') {
+      // כל יום = 1 נקודה, חוץ מחמישי = 0.5
+      // כאן צריך לוגיקה שמזהה אם יום חמישי כלול בתאריכים
+      shiftScore = calculateKitchenScore(s, 'Thursday', 0.5);
+    }
+    else if (s.type === 'מטבח_סופש') {
+      // יום שני = 0.5
+      shiftScore = calculateKitchenScore(s, 'Monday', 0.5);
+    }
+    else if (s.type === 'שמירה') {
+      // ימי שני = 0.5
+      shiftScore = calculateKitchenScore(s, 'Monday', 0.5);
+    }
+    else {
+      // ברירת מחדל
+      shiftScore = 1;
+    }
+
+    return totalScore + shiftScore;
+  }, 0);
 }
 
 // פונקציית עזר לחישוב הנקודות לפי יום ספציפי בתורנות
 function calculateKitchenScore(shift, targetDayName, specialValue) {
-    // לוגיקה שמחשבת כמה ימים סה"כ יש בתורנות פחות החצי יום המיוחד
-    const start = new Date(shift.start_date);
-    const end = new Date(shift.end_date);
-    const totalDays = Math.round((end - start) / (1000 * 60 * 60 * 24)) + 1;
-    
-    // אם היום המיוחד כלול בתורנות
-    return totalDays - 0.5; // חישוב פשטני: כל התורנות היא נקודות פחות ההפרש
+  // לוגיקה שמחשבת כמה ימים סה"כ יש בתורנות פחות החצי יום המיוחד
+  const start = new Date(shift.start_date);
+  const end = new Date(shift.end_date);
+  const totalDays = Math.round((end - start) / (1000 * 60 * 60 * 24)) + 1;
+
+  // אם היום המיוחד כלול בתורנות
+  return totalDays - 0.5; // חישוב פשטני: כל התורנות היא נקודות פחות ההפרש
 }
 
 async function autoAssignShifts(shifts, users, constraints, exemptions, shiftTypes) {
-    // 1. ניקוי ומיון תורנויות (ארוכות ראשונות)
-    const sortedShifts = shifts
-        .filter(s => !s.user_id || s.user_id === 0 || s.user_id === "")
-        .map(s => ({ 
-            ...s, 
-            days: Math.round((new Date(s.end_date) - new Date(s.start_date)) / (1000 * 60 * 60 * 24)) + 1 
-        }))
-        .sort((a, b) => b.days - a.days);
+  // 1. ניקוי ומיון תורנויות (ארוכות ראשונות)
+  const sortedShifts = shifts
+    .filter(s => !s.user_id || s.user_id === 0 || s.user_id === "")
+    .map(s => ({
+      ...s,
+      days: Math.round((new Date(s.end_date) - new Date(s.start_date)) / (1000 * 60 * 60 * 24)) + 1
+    }))
+    .sort((a, b) => b.days - a.days);
 
-    // 2. סינון משתמשים כשירים
-    const rotationUsers = users.filter(u => 
-        u.is_active === 1 && 
-        u.does_shifts === 1 && 
-        u.role !== 'אחראי' && 
-        u.role !== 'admin'
-    );
+  // 2. סינון משתמשים כשירים
+  const rotationUsers = users.filter(u =>
+    u.is_active === 1 &&
+    u.does_shifts === 1 &&
+    u.role !== 'אחראי' &&
+    u.role !== 'admin'
+  );
 
-    // 3. ניהול עומס פנימי (כאן נשמר הציון המעודכן בזמן הריצה)
-    let userLoads = {};
-    rotationUsers.forEach(u => {
-        userLoads[u.id] = shifts
-            .filter(s => s.user_id === u.id)
-            .reduce((sum, s) => sum + Math.round((new Date(s.end_date) - new Date(s.start_date)) / (1000 * 60 * 60 * 24)) + 1, 0);
+  // 3. ניהול עומס פנימי (כאן נשמר הציון המעודכן בזמן הריצה)
+  let userLoads = {};
+  rotationUsers.forEach(u => {
+    userLoads[u.id] = shifts
+      .filter(s => s.user_id === u.id)
+      .reduce((sum, s) => sum + Math.round((new Date(s.end_date) - new Date(s.start_date)) / (1000 * 60 * 60 * 24)) + 1, 0);
+  });
+
+  // 4. שיבוץ לולאתי
+  for (const shift of sortedShifts) {
+    const shiftStart = new Date(shift.start_date);
+    const shiftEnd = new Date(shift.end_date);
+
+    // סינון: מי פנוי כרגע?
+    let availableCandidates = rotationUsers.filter(user => {
+      // א. בדיקת התנגשות עם תורנות קודמת (המרחק 5 ימים וכדומה)
+      const hasClash = shifts.some(s =>
+        s.user_id === user.id &&
+        Math.abs(new Date(s.start_date) - shiftStart) / (1000 * 60 * 60 * 24) < 5
+      );
+      if (hasClash) return false;
+
+      // ב. בדיקה האם יש אילוץ פעיל לגף של החייל בטווח התאריכים של התורנות
+      const hasDivisionConstraint = constraints && constraints.some(c => {
+        if (!c.division || c.division !== user.division) return false;
+        const cStart = new Date(c.start_date);
+        const cEnd = new Date(c.end_date);
+        // בדיקת חפיפה בין טווח התורנות לטווח האילוץ
+        return shiftStart <= cEnd && shiftEnd >= cStart;
+      });
+      if (hasDivisionConstraint) return false;
+
+      // ג. (אופציונלי אם תרצי בהמשך) בדיקת אילוץ אישי לחייל הספציפי
+      const hasPersonalConstraint = constraints && constraints.some(c => {
+        if (c.user_id !== user.id) return false;
+        const cStart = new Date(c.start_date);
+        const cEnd = new Date(c.end_date);
+        return shiftStart <= cEnd && shiftEnd >= cStart;
+      });
+      if (hasPersonalConstraint) return false;
+
+      return true;
     });
 
-    // 4. שיבוץ לולאתי
-    for (const shift of sortedShifts) {
-        const shiftStart = new Date(shift.start_date);
-        const shiftEnd = new Date(shift.end_date);
-        
-        // סינון: מי פנוי כרגע?
-        let availableCandidates = rotationUsers.filter(user => {
-            // א. בדיקת התנגשות עם תורנות קודמת (המרחק 5 ימים וכדומה)
-            const hasClash = shifts.some(s => 
-                s.user_id === user.id && 
-                Math.abs(new Date(s.start_date) - shiftStart) / (1000 * 60 * 60 * 24) < 5
-            );
-            if (hasClash) return false;
+    // בחירת החייל עם ה-load הכי נמוך מתוך הפנויים
+    availableCandidates.sort((a, b) => userLoads[a.id] - userLoads[b.id]);
+    const bestUser = availableCandidates[0];
 
-            // ב. בדיקה האם יש אילוץ פעיל לגף של החייל בטווח התאריכים של התורנות
-            const hasDivisionConstraint = constraints && constraints.some(c => {
-                if (!c.division || c.division !== user.division) return false;
-                const cStart = new Date(c.start_date);
-                const cEnd = new Date(c.end_date);
-                // בדיקת חפיפה בין טווח התורנות לטווח האילוץ
-                return shiftStart <= cEnd && shiftEnd >= cStart;
-            });
-            if (hasDivisionConstraint) return false;
-
-            // ג. (אופציונלי אם תרצי בהמשך) בדיקת אילוץ אישי לחייל הספציפי
-            const hasPersonalConstraint = constraints && constraints.some(c => {
-                if (c.user_id !== user.id) return false;
-                const cStart = new Date(c.start_date);
-                const cEnd = new Date(c.end_date);
-                return shiftStart <= cEnd && shiftEnd >= cStart;
-            });
-            if (hasPersonalConstraint) return false;
-
-            return true;
-        });
-
-        // בחירת החייל עם ה-load הכי נמוך מתוך הפנויים
-        availableCandidates.sort((a, b) => userLoads[a.id] - userLoads[b.id]);
-        const bestUser = availableCandidates[0];
-
-        if (bestUser) {
-            await new Promise(r => db.run('UPDATE Shifts SET user_id = ? WHERE id = ?', [bestUser.id, shift.id], r));
-            shift.user_id = bestUser.id;
-            userLoads[bestUser.id] += shift.days; // עדכון המונה הפנימי
-        }
+    if (bestUser) {
+      await new Promise(r => db.run('UPDATE Shifts SET user_id = ? WHERE id = ?', [bestUser.id, shift.id], r));
+      shift.user_id = bestUser.id;
+      userLoads[bestUser.id] += shift.days; // עדכון המונה הפנימי
     }
+  }
 }
 // 5. הפעלת השרת על פורט 3001
 const PORT = 3001;

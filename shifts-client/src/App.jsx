@@ -365,7 +365,7 @@ function App() {
       .then(data => {
         const formattedConstraints = data.map(c => {
           let targetName = 'כללי';
-          
+
           // בדיקה האם יש גף שמור לאילוץ הזה
           if (c.division && c.division !== 'לא מוגדר' && c.division.trim() !== '') {
             targetName = `גף ${c.division}`;
@@ -374,13 +374,13 @@ function App() {
           }
 
           return {
-            id: `c-${c.id}`,      
-            dbId: c.id,          
+            id: `c-${c.id}`,
+            dbId: c.id,
             userId: c.user_id,
             division: c.division,
             originalStart: c.start_date,
             originalEnd: c.end_date,
-            title: `אילוץ: ${targetName} - ${c.reason}`, 
+            title: `אילוץ: ${targetName} - ${c.reason}`,
             start: new Date(`${c.start_date}T00:00:00`),
             end: new Date(`${c.end_date}T23:59:59`),
             allDay: true,
@@ -517,7 +517,16 @@ function App() {
     localStorage.removeItem('app_user');
     setCurrentUser(null);
   };
-
+  const handleConnectCalendar = () => {
+    // פונים לשרת כדי לקבל את הקישור המיוחד לחייל הנוכחי
+    fetch(`http://localhost:3001/api/calendar/auth-url?userId=${currentUser.id}`)
+      .then(res => res.json())
+      .then(data => {
+        // מעבירים את החייל אוטומטית לעמוד ההתחברות של גוגל
+        window.location.href = data.url;
+      })
+      .catch(err => console.error("שגיאה ביצירת קישור ליומן:", err));
+  };
   const handleLogin = (e) => {
     e.preventDefault();
     fetch('http://localhost:3001/api/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ full_name: loginName, password: loginPassword }) })
@@ -1559,7 +1568,7 @@ function App() {
     }
   };
   // דוגמה לשימוש בנתונים מסוננים:
-const fetchDivisions = () => {
+  const fetchDivisions = () => {
     try {
       const uniqueDivisions = [...new Set(
         users
@@ -2467,9 +2476,27 @@ const fetchDivisions = () => {
               <div>
                 <button
                   onClick={handleAutoAssign}
-                  style={{ display: 'block', marginTop: '5px', padding: '4px 8px', background: theme.pink, color: theme.darkgreen, border: `2px solid ${theme.darkgreen}`, borderRadius: '8px', cursor: 'pointer', fontSize: '12px', fontWeight: "bold", width: "80px", position: "absolute", right: "35px", top: "70px" }}
+                  style={{
+                    marginTop: '5px', padding: '4px 8px', background: theme.pink, color: theme.darkgreen, border: `2px solid ${theme.darkgreen}`, borderRadius: '8px',
+                    cursor: 'pointer', fontSize: '12px', fontWeight: "bold", width: "80px", position: "absolute", right: "35px", top: "70px"
+                  }}
                 >שבץ</button>
               </div>
+            </div>
+          )
+        }
+        {
+          currentUser.role === 'soldier' && (
+            <div>
+              {/* הכפתור החדש שלנו! */}
+              <button
+                onClick={handleConnectCalendar}
+                style={{
+                  marginTop: '5px', padding: '4px 8px', background: theme.pink, color: theme.darkgreen, border: `2px solid ${theme.darkgreen}`,
+                  borderRadius: '8px', cursor: 'pointer', fontSize: '12px', fontWeight: "bold", width: "110px", position: "absolute", right: "130px", top: "70px",
+                }}>
+                סנכרן ליומן גוגל
+              </button>
             </div>
           )
         }

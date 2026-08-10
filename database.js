@@ -38,6 +38,10 @@ db.serialize(() => {
     if (!hasDivision) {
       db.run(`ALTER TABLE Users ADD COLUMN division TEXT DEFAULT 'לא מוגדר'`);
     }
+    const hasGoogleToken = columns.find(col => col.name === 'google_refresh_token');
+    if (!hasGoogleToken) {
+      db.run(`ALTER TABLE Users ADD COLUMN google_refresh_token TEXT`);
+    }
   });
 
   // 4. יצירת טבלת סוגי תורנויות
