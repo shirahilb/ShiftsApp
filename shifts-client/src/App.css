@@ -286,3 +286,36 @@ div::-webkit-scrollbar-thumb {
 .rbc-today {
   background-color: #eecdd4 !important; /* צבע ה-pink שלך */
 }
+/* עיצוב חלונית ה-Tooltip המובנית של הלוח */
+.rbc-overlay {
+  background-color: #F8F2E4 !important;
+  border: 2px solid #28593C !important;
+  border-radius: 12px !important;
+  padding: 10px !important;
+  z-index: 99999 !important;
+  direction: rtl !important;
+  margin-left: -80px;
+  width: 10px;
+}
+
+/* כותרת התאריך בטולטיפ */
+.rbc-overlay-header {
+  color: #28593C !important;
+  font-weight: bold !important;
+  border-bottom: 1px solid #4D6B4F !important;
+  padding-bottom: 3px !important;
+  margin-bottom: 8px !important;
+}
+
+/* כפתור ה-Show More בלוח */
+.rbc-show-more {
+  background-color: #E8B0BD !important;
+  color: #28593C !important;
+  border-radius: 6px !important;
+  padding: 2px 6px !important;
+  font-size: 12px !important;
+  text-decoration: none !important;
+  display: inline-block !important;
+  margin-top: 2px !important;
+  cursor: pointer !important;
+}

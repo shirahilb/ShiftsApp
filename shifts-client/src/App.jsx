@@ -2577,6 +2577,10 @@ function App() {
               onSelectSlot={handleSelectSlot}
               components={{ toolbar: (props) => <CustomToolbar {...props} theme={theme} currentUser={currentUser} /> }}
               style={{ flex: 1, backgroundColor: theme.backgroundcolor, color: theme.darkgreen }}
+              popup={true}
+              messages={{
+                showMore: (total) => `+ עוד ${total}`
+              }}
 
             />
 
