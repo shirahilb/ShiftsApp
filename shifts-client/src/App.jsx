@@ -1159,8 +1159,8 @@ function App() {
 
     // בחירת חייל (Highlight)
     let currentFilter = 'none';
-    if (selectedUserId && event.userId && event.type === 'shift') {
-      if (event.userId == selectedUserId) {
+    if (selectedUserId) {
+      if (event.userId && String(event.userId) === String(selectedUserId)) {
         currentOpacity = 1;
         currentBorder = '2px solid #000';
       } else {
@@ -1300,6 +1300,7 @@ function App() {
 
       return {
         id: `ex-${e.id}`,
+        userId: originalShift?.userId || originalShift?.user_id,
         title: `החלפה: ${typeName} | מחליף את: ${originalShift?.full_name || 'לא ידוע'}`,
         start: new Date(e.start_date),
         end: new Date(e.end_date),
@@ -2647,7 +2648,7 @@ function App() {
         <Draggable nodeRef={nodeRef}>
           <div ref={nodeRef} style={{
             position: 'absolute', right: '1650px', top: '250px', width: '240px',
-            backgroundColor: theme.pink, height: "700px", borderRadius: '20px',
+            backgroundColor: theme.pink, height: 'auto',maxHeight: 'calc(100vh - 180px)', borderRadius: '20px',
             padding: '20px', zIndex: 10, color: theme.darkgreen, display: 'flex',
             flexDirection: 'column', gap: '15px', border: `2px solid ${theme.darkgreen}`
           }}>
