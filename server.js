@@ -318,23 +318,23 @@ app.put('/api/shifts/:id', (req, res) => {
 });
 
 // --- מחיקת תורנות ---
+// --- מחיקת תורנות וההחלפות הקשורות אליה ---
 app.delete('/api/shifts/:id', (req, res) => {
   const shiftId = req.params.id;
 
-  // מחיקת פטורים/החלפות הקשורים לתורנות קודם
-  db.run(`DELETE FROM Shift_Exemptions WHERE shift_id = ?`, [shiftId], function (err) {
+  // 1. מחיקת כל ההחלפות של התורנות הזו
+  db.run(`DELETE FROM Shift_Exemptions WHERE shift_id = ?`, [shiftId], (err) => {
     if (err) {
-      console.error("שגיאה במחיקת פטורים:", err.message);
-      return res.status(500).json({ error: "שגיאה במחיקת פטורים" });
+      console.error("שגיאה במחיקת פטורים/החלפות:", err.message);
     }
 
-    // מחיקת התורנות עצמה
-    db.run(`DELETE FROM Shifts WHERE id = ?`, [shiftId], function (err) {
-      if (err) {
-        console.error("שגיאה במחיקת תורנות:", err.message);
+    // 2. מחיקת התורנות עצמה
+    db.run(`DELETE FROM Shifts WHERE id = ?`, [shiftId], function (deleteErr) {
+      if (deleteErr) {
+        console.error("שגיאה במחיקת תורנות:", deleteErr.message);
         return res.status(500).json({ error: "שגיאה במחיקת תורנות" });
       }
-      res.json({ message: 'נמחק בהצלחה!' });
+      res.json({ message: 'התורנות וההחלפות שלה נמחקו בהצלחה!' });
     });
   });
 });
