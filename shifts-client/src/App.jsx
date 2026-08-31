@@ -512,7 +512,13 @@ function App() {
         .catch(err => console.error("שגיאה בטעינת תקופות:", err));
     }
   }, [currentUser]);
-
+  useEffect(() => {
+    if (currentUser) {
+      // מנקה אוטומטית החלפות של תורנויות שכבר נמחקו
+      fetch('http://localhost:3001/api/shift-exemptions/cleanup', { method: 'DELETE' })
+        .catch(err => console.error("שגיאה בניקוי החלפות יתומות:", err));
+    }
+  }, [currentUser]);
   const handleLogout = () => {
     localStorage.removeItem('app_user');
     setCurrentUser(null);
@@ -1034,28 +1040,39 @@ function App() {
     // 1. טיפול בלחיצה על "החלפה" (Exemption) בלוח
     if (event.type === 'exemption') {
       const e = event.exemptionData;
+      if (!e || !e.id) return;
 
-      setReplacementForm({
-        type: e.type || 'pet',
-        startDate: e.start_date ? e.start_date.split('T')[0] : '',
-        endDate: e.end_date ? e.end_date.split('T')[0] : '',
-        // אנחנו בודקים אם השדה קיים, אם לא - מחזירים מחרוזת ריקה
-        startTime: e.start_time ? e.start_time.substring(0, 5) : '',
-        endTime: e.end_time ? e.end_time.substring(0, 5) : ''
-      });
-
-      setReplacementData({
-        id: e.id,
-        shift_id: e.shift_id,
-        type: e.type
-      });
-      // ...
-
-
-      setEditingShiftId(e.shift_id);
-
+      const confirmDelete = window.confirm("האם ברצונך למחוק את ההחלפה הזו מהלוח ולהחזיר את התורנות המקורית?");
+      if (confirmDelete) {
+        deleteReplacement(e.id);
+      }
       return;
     }
+    // 1. טיפול בלחיצה על "החלפה" (Exemption) בלוח
+    // if (event.type === 'exemption') {
+    //   const e = event.exemptionData;
+
+    //   setReplacementForm({
+    //     type: e.type || 'pet',
+    //     startDate: e.start_date ? e.start_date.split('T')[0] : '',
+    //     endDate: e.end_date ? e.end_date.split('T')[0] : '',
+    //     // אנחנו בודקים אם השדה קיים, אם לא - מחזירים מחרוזת ריקה
+    //     startTime: e.start_time ? e.start_time.substring(0, 5) : '',
+    //     endTime: e.end_time ? e.end_time.substring(0, 5) : ''
+    //   });
+
+    //   setReplacementData({
+    //     id: e.id,
+    //     shift_id: e.shift_id,
+    //     type: e.type
+    //   });
+    //   // ...
+
+
+    //   setEditingShiftId(e.shift_id);
+
+    //   return;
+    // }
 
     if (event.type === 'constraint') {
       // 1. אופציה א': פתיחת מודאל מחיקה
@@ -1671,7 +1688,15 @@ function App() {
   // במקום להשתמש בחישוב הישן, נשתמש בזה:
   const getNetStats = (userId, periodShifts, shiftTypes) => {
     if (!periodShifts || !Array.isArray(periodShifts)) {
-      return { netPoints: 0, netShabbats: 0, shabbatExemptionPoints: 0, shosh: 0, mkutzarot: 0 };
+      return {
+        netPoints: 0,
+        netShabbats: 0,
+        shabbatExemptionPoints: 0,
+        shosh: 0,
+        mkutzarot: 0,
+        shushCount: 0,
+        mkuzeretCount: 0
+      };
     }
 
     let netPoints = 0;
@@ -1686,38 +1711,80 @@ function App() {
       const type = shiftTypes ? shiftTypes.find(t => t.id == s.shiftTypeId) : null;
       const typeName = type?.name || "";
 
-      let current = new Date(s.originalStart);
-      let end = new Date(s.originalEnd);
-
-      const startDate = new Date(s.originalStart);
-      const endDate = new Date(s.originalEnd);
-      const startDay = startDate.getDay();
+      const startDate = new Date(s.originalStart.includes('T') ? s.originalStart : `${s.originalStart}T00:00:00`);
+      const endDate = new Date(s.originalEnd.includes('T') ? s.originalEnd : `${s.originalEnd}T23:59:59`);
+      const startDay = startDate.getDay(); // 0 = ראשון, 4 = חמישי, 5 = שישי, 6 = שבת
       const endDay = endDate.getDay();
 
-      if (startDay === 0) mkutzarot += 1;
-      if (endDay === 5) shosh += 1;
+      const originalShiftId = s.id ? s.id.toString().split('-')[0] : null;
+      const relevantExemptions = shiftExemptions.filter(ex =>
+        ex.shift_id && originalShiftId && String(ex.shift_id) === String(originalShiftId)
+      );
 
-      let totalDaysInShift = Math.round((end - current) / (1000 * 60 * 60 * 24)) + 1;
+      // בדיקה האם קיימת החלפת פט שמכסה את יום שבת
+      const petWeekendExemption = relevantExemptions.find(ex => {
+        if (ex.type !== 'pet') return false;
+        const exStart = new Date(ex.start_date.includes('T') ? ex.start_date : `${ex.start_date}T00:00:00`);
+        const exEnd = new Date(ex.end_date.includes('T') ? ex.end_date : `${ex.end_date}T23:59:59`);
+
+        let d = new Date(exStart);
+        while (d <= exEnd) {
+          if (d.getDay() === 6) return true; // מכסה שבת
+          d.setDate(d.getDate() + 1);
+        }
+        return false;
+      });
+
+      // --- חישוב שו"ש ומקוצרת ---
+      if (petWeekendExemption) {
+        // יש החלפת פט בסופ"ש שמכסה את שבת
+        const petStart = new Date(petWeekendExemption.start_date.includes('T') ? petWeekendExemption.start_date : `${petWeekendExemption.start_date}T00:00:00`);
+        const petEnd = new Date(petWeekendExemption.end_date.includes('T') ? petWeekendExemption.end_date : `${petWeekendExemption.end_date}T23:59:59`);
+        const petStartDay = petStart.getDay();
+        const petEndDay = petEnd.getDay();
+
+        // החייל יוצא בשישי הביתה כשהפט נכנס
+        if (petStartDay === 5) {
+          shosh += 1;
+        }
+
+        // הפט מסתיים בשבת והחייל חוזר בשבת בערב (מקוצרת) לתורנות בראשון בבוקר
+        if (petEndDay === 6 || (endDay !== 6 && endDay >= 0)) {
+          mkutzarot += 1;
+        }
+      } else {
+        // תורנות רגילה ללא פט
+        // תורנות שמתחילה בראשון בבוקר דורשת הגעה בשבת -> מקוצרת
+        if (startDay === 0) mkutzarot += 1;
+        // תורנות שמסתיימת בשישי -> החייל יוצא בשישי -> שו"ש
+        if (endDay === 5) shosh += 1;
+      }
+
+      // --- חישוב ימי עבודה, שבתות וניקוד ---
+      let current = new Date(startDate);
+      const totalDaysInShift = Math.round((endDate - startDate) / (1000 * 60 * 60 * 24)) + 1;
       let dayIndex = 0;
       let shiftPointsAccumulator = 0;
 
-      // שלב א': חישוב מלא של נקודות הבסיס של התורנות
-      while (current <= end) {
+      while (current <= endDate) {
         const isShabbat = current.getDay() === 6;
         const dayOfWeek = current.getDay();
 
-        const hasExemption = shiftExemptions.some(ex =>
-          ex.shift_id == s.id &&
-          current.getTime() >= new Date(ex.start_date).getTime() &&
-          current.getTime() <= new Date(ex.end_date).getTime()
-        );
+        const hasExemption = relevantExemptions.some(ex => {
+          const exStart = new Date(ex.start_date.includes('T') ? ex.start_date : `${ex.start_date}T00:00:00`);
+          const exEnd = new Date(ex.end_date.includes('T') ? ex.end_date : `${ex.end_date}T23:59:59`);
+          return current >= exStart && current <= exEnd;
+        });
 
         if (isShabbat) {
-          if (hasExemption) shabbatExemptionPoints += 1;
-          else netShabbats += 1;
+          if (hasExemption) {
+            shabbatExemptionPoints += 1; // לא נספר כשבת בפועל
+          } else {
+            netShabbats += 1; // שבת מלאה ללא פט
+          }
         }
 
-        let dailyPoints = 1.0;
+        let dailyPoints = Number(type?.points_base || 1.0);
         if (typeName.includes('שמירות')) {
           if (dayIndex === 0 || dayIndex === totalDaysInShift - 1) dailyPoints = 0.5;
         } else if (typeName.includes('מטבח')) {
@@ -1731,30 +1798,21 @@ function App() {
         dayIndex++;
       }
 
-      // שלב ב': חישוב הפחתה מדויקת לפי סוג ההחלפה
-      const originalShiftId = s.id ? s.id.toString().split('-')[0] : null;
-
-      const relevantExemptions = shiftExemptions.filter(ex =>
-        ex.shift_id && originalShiftId && String(ex.shift_id) === String(originalShiftId) && (ex.type === 'pet' || ex.type === 'squadron')
-      );
-
+      // קיזוז ימי פטור/פט מהניקוד
       if (relevantExemptions.length > 0) {
-        let currentCheck = new Date(s.originalStart);
+        let currentCheck = new Date(startDate);
         let daysToSubtract = 0;
         let dayIdx = 0;
 
-        // נבדוק האם יש לפחות החלפת פט אחת בטווח (בשביל השושים/מקוצרות)
-        const hasPetInList = relevantExemptions.some(ex => ex.type === 'pet');
-        let isWeekendShift = s.isWeekend;
-
-        while (currentCheck <= new Date(s.originalEnd)) {
-          const isCovered = relevantExemptions.some(ex =>
-            currentCheck.getTime() >= new Date(ex.start_date).getTime() &&
-            currentCheck.getTime() <= new Date(ex.end_date).getTime()
-          );
+        while (currentCheck <= endDate) {
+          const isCovered = relevantExemptions.some(ex => {
+            const exStart = new Date(ex.start_date.includes('T') ? ex.start_date : `${ex.start_date}T00:00:00`);
+            const exEnd = new Date(ex.end_date.includes('T') ? ex.end_date : `${ex.end_date}T23:59:59`);
+            return currentCheck >= exStart && currentCheck <= exEnd;
+          });
 
           if (isCovered) {
-            let dailyPoints = 1.0;
+            let dailyPoints = Number(type?.points_base || 1.0);
             if (typeName.includes('שמירות')) {
               if (dayIdx === 0 || dayIdx === totalDaysInShift - 1) dailyPoints = 0.5;
             } else if (typeName.includes('מטבח')) {
@@ -1771,12 +1829,6 @@ function App() {
         }
 
         shiftPointsAccumulator = Math.max(0, shiftPointsAccumulator - daysToSubtract);
-
-        // השושים והמקוצרות מתעדכנים אך ורק אם מדובר בהחלפת פט בסופ"ש ולא בהחלפת טייסת באמצע השבוע
-        if (hasPetInList && isWeekendShift) {
-          if (startDay !== 0) mkutzarot += 1;
-          if (endDay !== 5) shosh += 1;
-        }
       }
 
       netPoints += shiftPointsAccumulator;
@@ -1784,10 +1836,12 @@ function App() {
 
     return {
       netPoints: Number(netPoints.toFixed(2)),
-      netShabbats: netShabbats,
+      netShabbats,
       shabbatExemptionPoints: Number(shabbatExemptionPoints.toFixed(2)),
       shosh,
-      mkutzarot
+      mkutzarot,
+      shushCount: shosh,
+      mkuzeretCount: mkutzarot
     };
   };
   const soldierStats = selectedUserObj ? getNetStats(selectedUserObj.id, displayedPeriodShifts, shiftTypes) : { netPoints: 0, netShabbats: 0, shabbatExemptionPoints: 0, shosh: 0, mkutzarot: 0 };
@@ -3320,28 +3374,25 @@ function App() {
                         const isChecked = e.target.checked;
 
                         if (!isChecked) {
-                          // 1. הורדת הסימון: ביטול ההחלפה
-                          if (replacementData.id) {
+                          // מציאת ההחלפה הקשורה לתורנות הזו
+                          const cleanShiftId = editingShiftId ? String(editingShiftId).split('-')[0] : null;
+                          const currentExemption = shiftExemptions.find(ex => String(ex.shift_id) === cleanShiftId) || (replacementData.id ? replacementData : null);
+
+                          if (currentExemption && currentExemption.id) {
                             try {
-                              await fetch(`http://localhost:3001/api/shift-exemptions/${replacementData.id}`, { method: 'DELETE' });
-
-                              // 2. עדכון מיידי של הסטייטים כדי שהלוח יתנקה
-                              setHasReplacement(false);
-                              setReplacementData({ shift_id: '', start_date: '', end_date: '', type: 'pet' });
-
-                              // 3. רענון הנתונים
-                              await fetchShiftExemptions();
-                              await fetchShifts();
-
-                              alert("ההחלפה הוסרה בהצלחה.");
+                              await fetch(`http://localhost:3001/api/shift-exemptions/${currentExemption.id}`, { method: 'DELETE' });
                             } catch (err) {
-                              console.error("שגיאה במחיקה:", err);
+                              console.error("שגיאה במחיקת החלפה:", err);
                             }
-                          } else {
-                            setHasReplacement(false);
                           }
+
+                          // איפוס ורענון מיידי
+                          setHasReplacement(false);
+                          setReplacementData({ shift_id: '', start_date: '', end_date: '', type: 'pet' });
+                          setReplacementForm({ type: 'pet', startDate: '', endDate: '', startTime: '', endTime: '' });
+                          await fetchShiftExemptions();
+                          await fetchShifts();
                         } else {
-                          // 4. הוספת הסימון: פתיחת המודאל
                           setHasReplacement(true);
                           setIsReplacementModalOpen(true);
                         }
@@ -3539,23 +3590,23 @@ function App() {
               {users.filter(u => u.is_active === 1 && (u.does_shifts === 1 || u.does_shifts === null)).map(user => {
                 const stats = getNetStats(user.id, displayedPeriodShifts, shiftTypes);
                 const userShifts = displayedPeriodShifts.filter(s => s.userId == user.id);
-                const balatamsCount = userShifts.filter(s => s.isBaltam).length; // חישוב הבלתמים
+                const balatamsCount = userShifts.filter(s => s.isBaltam).length;
 
                 return (
                   <tr key={user.id} style={{ borderBottom: `2px solid ${theme.darkgreen}` }}>
                     <td style={{ padding: '10px', border: `1px solid ${theme.darkgreen}` }}>{user.full_name}</td>
                     <td style={{ padding: '10px', fontWeight: 'bold', border: `1px solid ${theme.darkgreen}` }}>{stats.netPoints}</td>
                     <td style={{ padding: '10px', border: `1px solid ${theme.darkgreen}` }}>{stats.netShabbats}</td>
-                    <td style={{ padding: '10px', border: `1px solid ${theme.darkgreen}` }}>{stats.shushCount}</td>
-                    <td style={{ padding: '10px', border: `1px solid ${theme.darkgreen}` }}>{stats.mkuẓeretCount}</td>
-                    <td style={{ padding: '10px', color: theme.darkgreen, border: `1px solid ${theme.darkgreen}` }}>{balatamsCount}</td> {/* הצגה */}
+                    <td style={{ padding: '10px', border: `1px solid ${theme.darkgreen}` }}>{stats.shosh}</td>
+                    <td style={{ padding: '10px', border: `1px solid ${theme.darkgreen}` }}>{stats.mkutzarot}</td>
+                    <td style={{ padding: '10px', color: theme.darkgreen, border: `1px solid ${theme.darkgreen}` }}>{balatamsCount}</td>
 
                     {shiftTypes.map(type => {
                       const count = userShifts.filter(s => s.shiftTypeId == type.id).length;
                       return <td key={type.id} style={{ padding: '10px', border: `1px solid ${theme.darkgreen}` }}>{count}</td>;
                     })}
 
-                    <td style={{ padding: '10px', fontSize: '20px', border: `1px solid ${theme.darkgreen}` }}>
+                    <td style={{ padding: '10px', fontSize: '15px', border: `1px solid ${theme.darkgreen}` }}>
                       {(() => {
                         const holidays = userShifts.filter(s => s.isHoliday && s.holidayName).map(s => s.holidayName);
                         const uniqueHolidays = [...new Set(holidays)];

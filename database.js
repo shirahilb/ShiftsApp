@@ -1,13 +1,16 @@
 const sqlite3 = require('sqlite3').verbose();
 const db = new sqlite3.Database('./shifts.db', (err) => {
   if (err) console.error('שגיאה בחיבור:', err.message);
-  else console.log('חיבור לבסיס הנתונים הצליח! 🗄️');
+  else {
+    console.log('חיבור לבסיס הנתונים הצליח! 🗄️');
+    db.run('PRAGMA foreign_keys = ON;');
+  }
 });
 
 db.serialize(() => {
   // 1. יצירת טבלת ארגונים
   db.run(`CREATE TABLE IF NOT EXISTS Organizations (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL)`);
-  
+
   // 2. יצירת טבלת תקופות (Periods)
   db.run(`CREATE TABLE IF NOT EXISTS Periods (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -32,7 +35,7 @@ db.serialize(() => {
     joined_date DATE, 
     FOREIGN KEY(organization_id) REFERENCES Organizations(id)
   )`);
-  
+
   db.all("PRAGMA table_info(Users)", (err, columns) => {
     const hasDivision = columns.find(col => col.name === 'division');
     if (!hasDivision) {
