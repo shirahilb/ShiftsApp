@@ -402,22 +402,32 @@ app.put('/api/shifts/publish', (req, res) => {
 // 10. נתיב התחברות (Login)
 // --- עדכון נתיב התחברות (כולל does_shifts) ---
 // בנתיב ה-login שלך בשרת:
-app.post('/api/login', async (req, res) => {
-  const { full_name, password } = req.body;
+app.post('/api/login', (req, res) => {
+  const full_name = req.body.full_name ? req.body.full_name.trim() : '';
+  const password = req.body.password ? String(req.body.password).trim() : '';
 
-  db.get("SELECT * FROM Users WHERE full_name = ?", [full_name], async (err, user) => {
-    if (err || !user) {
+  console.log(`\n🔍 ניסיון התחברות: שם='${full_name}', סיסמה='${password}'`);
+
+  // שליפת כל המשתמשים עם השם הזה
+  db.all("SELECT * FROM Users WHERE TRIM(full_name) = ?", [full_name], (err, matchingUsers) => {
+    if (err) {
+      console.error("❌ שגיאת SQL ב-login:", err.message);
+      return res.status(500).json({ error: "שגיאת שרת" });
+    }
+
+    if (!matchingUsers || matchingUsers.length === 0) {
+      console.log(`❌ לא נמצא משתמש בשם '${full_name}'`);
       return res.status(401).json({ error: "שם משתמש או סיסמה שגויים" });
     }
 
-    // כאן הקסם: השוואת הסיסמה שהוזנה מול ה-Hash שנשמר ב-DB
-    const match = await bcrypt.compare(password, user.password);
+    // חיפוש המשתמש שהסיסמה שלו תואמת מתוך כל הרשומות עם אותו השם
+    const authenticatedUser = matchingUsers.find(u => String(u.password).trim() === password);
 
-    if (match) {
-      // סיסמה נכונה! מחזירים את פרטי המשתמש
-      res.json({ user });
+    if (authenticatedUser) {
+      console.log(`✅ התחברות הצליחה! משתמש id=${authenticatedUser.id}, תפקיד=${authenticatedUser.role}`);
+      res.json({ user: authenticatedUser });
     } else {
-      // סיסמה שגויה
+      console.log(`❌ נמצאו ${matchingUsers.length} משתמשים בשם '${full_name}', אך אף סיסמה לא תואמת למה שהוזן.`);
       res.status(401).json({ error: "שם משתמש או סיסמה שגויים" });
     }
   });

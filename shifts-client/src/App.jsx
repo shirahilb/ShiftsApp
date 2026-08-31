@@ -2493,7 +2493,7 @@ function App() {
                 onClick={handleConnectCalendar}
                 style={{
                   marginTop: '5px', padding: '4px 8px', background: theme.pink, color: theme.darkgreen, border: `2px solid ${theme.darkgreen}`,
-                  borderRadius: '8px', cursor: 'pointer', fontSize: '12px', fontWeight: "bold", width: "110px", position: "absolute", right: "130px", top: "70px",
+                  borderRadius: '8px', cursor: 'pointer', fontSize: '12px', fontWeight: "bold", width: "110px", position: "absolute", right: "130px", top: "83px",
                 }}>
                 סנכרן ליומן גוגל
               </button>
